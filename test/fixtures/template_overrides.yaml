@@ -1,0 +1,30 @@
+# melos_managed_dependency_overrides: dart_mappable_builder,digit_data_model
+dependency_overrides:
+  just_game_engine:
+    path: packages/just_game_engine
+  just_physics_engine:
+    path: packages/just_physics_engine
+  just_inputs:
+    path: packages/just_inputs
+  just_debugger:
+    path: packages/just_debugger
+  just_colours:
+    path: packages/just_colours
+  just_game_engine_editor:
+    path: packages/just_game_engine_editor
+  just_gamepads:
+    path: packages/just_gamepads
+  just_dart:
+    path: packages/just_dart
+  just_tiled:
+    path: packages/just_tiled
+  just_deflate:
+    path: packages/just_deflate
+  just_platformer_kit:
+    path: packages/just_platformer_kit
+  just_sprite_editor:
+    path: packages/just_sprite_editor
+  just_ui_editor:
+    path: packages/just_ui_editor
+  just_input_editor:
+    path: packages/just_input_editor

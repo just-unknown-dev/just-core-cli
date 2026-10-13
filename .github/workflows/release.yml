@@ -1,0 +1,89 @@
+# A tag like v0.1.0: compile `just` and `ju` for each platform and attach
+# them to the GitHub release, for people who don't install with
+# `dart pub global activate just_core_cli`. (Publishing to pub.dev stays a
+# person's step: `dart pub publish`.)
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+            ext: .exe
+          - os: ubuntu-latest
+            target: linux-x64
+            ext: ''
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            ext: ''
+          - os: macos-latest
+            target: macos-arm64
+            ext: ''
+          # GitHub's last Intel macOS runner.
+          - os: macos-15-intel
+            target: macos-x64
+            ext: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+
+      - name: The tag matches the version
+        shell: bash
+        run: |
+          version=$(grep -E '^version:' pubspec.yaml | tr -d '\r' | awk '{print $2}')
+          test "v$version" = "${{ github.ref_name }}" \
+            || { echo "Tag ${{ github.ref_name }} but pubspec says $version"; exit 1; }
+
+      - run: dart pub get
+
+      - name: Compile
+        shell: bash
+        run: |
+          mkdir -p dist/just_core_cli
+          dart compile exe bin/just.dart -o "dist/just_core_cli/just${{ matrix.ext }}"
+          dart compile exe bin/ju.dart -o "dist/just_core_cli/ju${{ matrix.ext }}"
+          # Each binary starts and knows its version.
+          test "$(dist/just_core_cli/just${{ matrix.ext }} --version | tr -d '\r')" = "just_core_cli ${GITHUB_REF_NAME#v}"
+          test "$(dist/just_core_cli/ju${{ matrix.ext }} --version | tr -d '\r')" = "just_core_cli ${GITHUB_REF_NAME#v}"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "just_core_cli-${{ github.ref_name }}-${{ matrix.target }}.zip" just_core_cli
+          else
+            tar czf "just_core_cli-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" just_core_cli
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/just_core_cli-*
+
+  release:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd dist && sha256sum just_core_cli-* > SHA256SUMS)
+          # This version's CHANGELOG section as the release notes.
+          awk -v head="## ${GITHUB_REF_NAME#v}" \
+            '$0 == head {on = 1; next} /^## / {on = 0} on' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no '## ${GITHUB_REF_NAME#v}' section"; exit 1; }
+          gh release create "${{ github.ref_name }}" dist/* \
+            --title "just_core_cli ${{ github.ref_name }}" --notes-file notes.md

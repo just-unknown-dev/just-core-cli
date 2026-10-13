@@ -1,0 +1,7 @@
+# LF everywhere, also in a Windows checkout (core.autocrlf): the tests
+# expect it.
+* text=auto eol=lf
+
+# Compared byte for byte: some fixtures are CRLF or binary on purpose.
+test/fixtures/** -text
+*.zip binary

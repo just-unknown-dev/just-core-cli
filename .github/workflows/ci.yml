@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - run: dart analyze --fatal-infos
+      # pub.dev takes points for unformatted code.
+      - run: dart format --output=none --set-exit-if-changed lib bin test tool example
+      - run: dart test
+      - run: dart pub publish --dry-run
+        if: matrix.os == 'ubuntu-latest'
+
+  # The primary library's toolkit runs on the web: its tests in Chrome, as
+  # JavaScript and as WebAssembly. (Test files that need dart:io are
+  # @TestOn('vm') and skipped here.) The runner image has Chrome.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - run: dart test -p chrome
+      - run: dart test -p chrome -c dart2wasm

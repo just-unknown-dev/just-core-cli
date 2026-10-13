@@ -1,0 +1,27 @@
+name: just_core_cli
+description: "The core of `just` (also `ju`), the Just ecosystem's command-line tool: projects, plugins and hooks, version sets, safe pubspec edits, transactions and downloads."
+version: 0.1.0
+homepage: https://github.com/just-unknown-dev/just-core-cli
+repository: https://github.com/just-unknown-dev/just-core-cli
+issue_tracker: https://github.com/just-unknown-dev/just-core-cli/issues
+
+topics:
+  - cli
+  - gamedev
+  - game-engine
+  - flutter
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  args: ^2.7.0
+  just_deflate: ^0.1.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6
+
+executables:
+  just: just
+  ju: ju
