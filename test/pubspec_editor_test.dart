@@ -91,6 +91,19 @@ void main() {
       );
       expect(deps['d'], isA<OtherDependency>());
     });
+
+    test('a long line costs its length, not its square', () {
+      final watch = Stopwatch()..start();
+      final deps = PubspecEditor.parse(
+        'dependencies:\n'
+        '  a: {path: a${' ' * 40000}b\n'
+        '  b: { path : ../b }\n',
+        marker: _store,
+      ).unmanaged('dependencies');
+      expect(deps['a'], isA<OtherDependency>());
+      expect(deps['b'], const PathDependency('../b'));
+      expect(watch.elapsed, lessThan(const Duration(seconds: 10)));
+    });
   });
 
   group('writing a block', () {

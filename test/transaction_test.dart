@@ -282,6 +282,55 @@ void main() {
       expect(ProjectTransaction.recover(project), isFalse);
     });
 
+    test('recover refuses a journal naming anything outside the project', () {
+      final victim = Directory.systemTemp.createTempSync('just_victim_');
+      addTearDown(() {
+        if (victim.existsSync()) victim.deleteSync(recursive: true);
+      });
+      File('${victim.path}/keep.txt').writeAsStringSync('mine');
+      final away = project.pathTo(victim.path).replaceAll(r'\', '/');
+      for (final edit in <Map<String, Object?> Function(Map<String, Object?>)>[
+        (j) => {
+          ...j,
+          'movedIn': [away],
+        },
+        (j) => {
+          ...j,
+          'movedIn': [''],
+        },
+        (j) => {
+          ...j,
+          'backups': {away: false},
+        },
+        (j) => {
+          ...j,
+          'aside': {'packages/kits/old': '../../../elsewhere'},
+        },
+        (j) => {
+          ...j,
+          'backups': {'pubspec.yaml': true},
+          'backupFiles': {'pubspec.yaml': '../../../elsewhere'},
+        },
+      ]) {
+        final txn = ProjectTransaction.begin(project, trash: 'test');
+        final journal = File('${txn.dir.path}/journal.json');
+        journal.writeAsStringSync(
+          jsonEncode(
+            edit(
+              jsonDecode(journal.readAsStringSync()) as Map<String, Object?>,
+            ),
+          ),
+        );
+        expect(
+          () => ProjectTransaction.recover(project),
+          throwsFormatException,
+        );
+        expect(File('${victim.path}/keep.txt').readAsStringSync(), 'mine');
+        expect(project.dir('packages/kits/old').existsSync(), isTrue);
+        txn.dir.deleteSync(recursive: true);
+      }
+    });
+
     test('recover finishes a change that had committed', () {
       final txn = ProjectTransaction.begin(project, trash: 'test')
         ..moveAside('old', 'packages/kits/old');

@@ -323,7 +323,6 @@ abstract final class PluginTrust {
     'just_game_engine_formats',
     'just_game_services',
     'just_gamepads',
-    'just_graphics_editor',
     'just_graphics_engine',
     'just_input_editor',
     'just_inputs',
@@ -342,10 +341,13 @@ abstract final class PluginTrust {
 
   /// The [official] names the ecosystem publishes on pub.dev, from its own
   /// publisher: from there they are trusted too. Each is published right
-  /// after the just_core_cli release that first lists it (just_game_engine_cli
-  /// after this one); no other name belongs here, as any other could be
-  /// anyone's on pub.dev.
-  static const Set<String> onPubDev = {'just_game_engine_cli'};
+  /// after the just_core_cli release that first lists it
+  /// (just_game_engine_cli after 0.1.0, just_asset_store after 0.1.1); no
+  /// other name belongs here, as any other could be anyone's on pub.dev.
+  static const Set<String> onPubDev = {
+    'just_asset_store',
+    'just_game_engine_cli',
+  };
 
   /// Whether [plugin] is one of the ecosystem's own: an [official] name
   /// from a local checkout or the ecosystem's repositories, or an

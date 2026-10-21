@@ -67,6 +67,13 @@ void main() {
     );
     expect(PackageNames.idProblem('my_tool'), isNull);
     expect(PackageNames.idProblem('My Tool'), isNotNull);
+    // Ids and categories are folder names: never one Windows can't make.
+    for (final device in ['con', 'nul', 'aux', 'prn', 'com1', 'lpt9']) {
+      expect(PackageNames.idProblem(device), contains('device'));
+      expect(PackageNames.isCategory(device), isFalse);
+    }
+    expect(PackageNames.isId('console'), isTrue);
+    expect(PackageNames.isCategory('com-tools'), isTrue);
   });
 
   test('a pubspec edit keeps every other byte', () {

@@ -1,3 +1,11 @@
+## 0.1.1
+
+- **just_asset_store from pub.dev is the ecosystem's own.** `PluginTrust.onPubDev` lists it: `just` runs the Asset Store's commands from a pub.dev install without asking, as it does just_game_engine_cli's. It is published right after this release.
+- `PluginTrust.official` no longer lists just_graphics_editor: the package is retired (editing 3D graphics is just_game_engine_editor's own), and a package published under its name now is asked about like any other.
+- **Crash recovery stays in the project.** `ProjectTransaction.recover` refuses a journal that names a file or folder outside the project (or the project folder itself), a backup copy outside its `backup/` folder, or a folder waiting aside outside its change's folder: a journal is a file in the project, and whatever could write one could otherwise make the next recovery delete or overwrite what it named. The journal is reported as unreadable, with where its backups are, and nothing is touched.
+- **Names Windows can't have.** `PackageNames.idProblem` and `PackageNames.isCategory` refuse Windows's device names (`con`, `prn`, `aux`, `nul`, `com0`–`com9`, `lpt0`–`lpt9`): ids and categories become folder names. `PackageNames.isWindowsDevice` says whether a name is one.
+- **Pubspecs read in linear time.** A dependency written `{path: …}` is read in one pass: a long line no longer costs the square of its length.
+
 ## 0.1.0
 
 The first release of the core of `just` (and `ju`, the same tool for machines where `just` is another program), the Just ecosystem's command-line tool, for Windows, macOS and Linux. It knows no product of its own; the Just Game Engine's commands come from the just_game_engine_cli plugin.

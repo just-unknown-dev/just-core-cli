@@ -631,12 +631,20 @@ void main() {
         expect(launcher.runs, isEmpty);
         expect('$err', contains('not from a local checkout'));
 
-        // pub.dev counts only for the names the ecosystem published there:
-        // the store's isn't one (yet), so anyone could have published it.
+        // pub.dev counts for the names the ecosystem published there: the
+        // store's is one since 0.1.1…
         lock(project, {'just_asset_store': 'hosted'});
-        expect(await runJust(['store', 'list'], context: context()), 1);
-        expect(launcher.runs, isEmpty);
+        expect(await runJust(['store', 'list'], context: context()), 0);
+        expect(launcher.runs, hasLength(1));
 
+        // …and only for those: another of its names, not published there
+        // yet, could be anyone's.
+        resolve(project, [package('just_sprite_editor', manifest: store)]);
+        lock(project, {'just_sprite_editor': 'hosted'});
+        expect(await runJust(['store', 'list'], context: context()), 1);
+        expect(launcher.runs, hasLength(1));
+
+        resolve(project, [package('just_asset_store', manifest: store)]);
         lock(project, {
           'just_asset_store':
               'https://github.com/just-unknown-dev/just-asset-store',
@@ -661,9 +669,14 @@ void main() {
         isTrue,
       );
       expect(
-        PluginTrust.trusted(plugin('just_asset_store', hosted), const []),
+        PluginTrust.trusted(plugin('just_sprite_editor', hosted), const []),
         isFalse,
         reason: 'not one the ecosystem has published on pub.dev',
+      );
+      expect(
+        PluginTrust.trusted(plugin('just_asset_store', hosted), const []),
+        isTrue,
+        reason: 'published on pub.dev after 0.1.1',
       );
       expect(PluginTrust.onPubDev, everyElement(isIn(PluginTrust.official)));
       expect(

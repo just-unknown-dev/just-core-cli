@@ -22,8 +22,16 @@ abstract final class PackageNames {
           'letter.';
     }
     if (_reservedWords.contains(id)) return '"$id" is a Dart reserved word.';
+    if (isWindowsDevice(id)) {
+      return '"$id" is a device name on Windows, where no folder can have it.';
+    }
     return null;
   }
+
+  /// Whether [name] is one of Windows's device names (`con`, `nul`,
+  /// `com1`…), which no file or folder there can be called.
+  static bool isWindowsDevice(String name) =>
+      RegExp(r'^(con|prn|aux|nul|com[0-9]|lpt[0-9])$').hasMatch(name);
 
   /// Whether [id] is a valid package name.
   static bool isId(String id) => idProblem(id) == null;
@@ -38,7 +46,8 @@ abstract final class PackageNames {
   /// Whether [text] is a category id: lowercase words joined by `-`.
   static bool isCategory(String text) =>
       RegExp(r'^[a-z][a-z0-9]*(-[a-z0-9]+)*$').hasMatch(text) &&
-      text.length <= 40;
+      text.length <= 40 &&
+      !isWindowsDevice(text);
 
   static const Set<String> _reservedWords = {
     'assert', 'break', 'case', 'catch', 'class', 'const', 'continue', //

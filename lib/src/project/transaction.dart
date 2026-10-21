@@ -580,6 +580,47 @@ final class ProjectTransaction {
     throw FileSystemException('Too many symbolic links', project.path(rel));
   }
 
+  /// Throws a [FormatException] when this journal, read back by [recover],
+  /// names what a replay must never touch: a file or folder outside the
+  /// project (or the project folder itself), a backup copy outside
+  /// `backup/`, or a folder waiting aside outside this change's folder. A
+  /// journal is a file in the project: whatever can write one must not be
+  /// able to make the next [recover] delete or overwrite something else.
+  void _checkReplayable() {
+    for (final rel in [
+      ..._backups.keys,
+      ..._links.keys,
+      ..._aside.keys,
+      ..._movedIn,
+    ]) {
+      try {
+        _inside(rel);
+      } on FileSystemException {
+        throw FormatException('it names $rel, which is not in the project');
+      }
+    }
+    for (final name in _backups.values) {
+      if (name != null &&
+          (name.isEmpty ||
+              name == '.' ||
+              name == '..' ||
+              name.contains('/') ||
+              name.contains(r'\'))) {
+        throw FormatException('it names the backup copy "$name"');
+      }
+    }
+    for (final where in _aside.values) {
+      final ok = File(where).isAbsolute
+          ? (project.relativeOf(where)?.isNotEmpty ?? false)
+          : !where.contains(r'\') &&
+                !where.startsWith('/') &&
+                where
+                    .split('/')
+                    .every((s) => s.isNotEmpty && s != '.' && s != '..');
+      if (!ok) throw FormatException('it keeps a folder aside at $where');
+    }
+  }
+
   /// Backs up [files] (paths in the project; missing ones are noted as
   /// missing, so a rollback deletes what the change created). A symbolic
   /// link is backed up as a link, and the file it leads to too — what a
@@ -1065,6 +1106,7 @@ final class ProjectTransaction {
       );
       (json['aside'] as Map).forEach((k, v) => t._aside['$k'] = '$v');
       t._movedIn.addAll([for (final p in json['movedIn'] as List) '$p']);
+      t._checkReplayable();
       final log = File('${d.path}/$_restoredLog');
       if (log.existsSync()) {
         final text = utf8.decode(log.readAsBytesSync(), allowMalformed: true);

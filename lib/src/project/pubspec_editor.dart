@@ -702,8 +702,8 @@ final class _Block {
 DependencySpec _spec(String value, List<String> children, List<String> raw) {
   if (children.isEmpty) {
     if (value.isEmpty) return OtherDependency(raw.join('\n'));
-    final flow = RegExp(r'^\{\s*path\s*:\s*([^,{}]+?)\s*\}$').firstMatch(value);
-    if (flow != null) return PathDependency(_unquote(flow[1]!));
+    final flow = _flowPath(value);
+    if (flow != null) return PathDependency(_unquote(flow));
     if (value.startsWith('{')) return OtherDependency(raw.join('\n'));
     return HostedDependency(_unquote(value));
   }
@@ -725,6 +725,24 @@ DependencySpec _spec(String value, List<String> children, List<String> raw) {
     );
   }
   return OtherDependency(raw.join('\n'));
+}
+
+/// The path of `{path: <path>}`, or null for any other value. Read in one
+/// pass, so a long line costs its length, never its square.
+String? _flowPath(String value) {
+  if (!value.startsWith('{') || !value.endsWith('}')) return null;
+  final inner = value.substring(1, value.length - 1).trimLeft();
+  if (!inner.startsWith('path')) return null;
+  final rest = inner.substring('path'.length).trimLeft();
+  if (!rest.startsWith(':')) return null;
+  final path = rest.substring(1).trim();
+  if (path.isEmpty ||
+      path.contains(',') ||
+      path.contains('{') ||
+      path.contains('}')) {
+    return null;
+  }
+  return path;
 }
 
 String _stripComment(String value) {
