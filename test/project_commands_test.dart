@@ -158,7 +158,7 @@ void main() {
       ('just_game_engine', false),
       ('just_game_engine_editor', true),
       ('just_asset_store', true),
-      ('just_asset_store_editor', true),
+      ('just_sprite_editor', true),
       ('just_game_engine_old', false),
     ]) {
       final p = Directory('${dir.path}/$name')..createSync(recursive: true);
@@ -184,6 +184,21 @@ void main() {
 
   /// What `pub get` resolves from [packages]: the game plugin and the
   /// store, the game plugin from [gameSource].
+  /// A plugin checkout named [name] in [plugins].
+  void pluginCheckout(Directory plugins, String name) {
+    File('${plugins.path}/$name/pubspec.yaml')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('name: $name\nversion: 0.1.0\n');
+  }
+
+  /// A workspace's other folder of checkouts, beside [checkouts]: the
+  /// plugins (a kit).
+  Directory pluginCheckouts() {
+    final dir = Directory('${tmp.path}/plugins')..createSync();
+    pluginCheckout(dir, 'just_world_builder_kit');
+    return dir;
+  }
+
   _Flutter resolving(
     Directory packages, {
     String gameSource = 'path',
@@ -272,6 +287,56 @@ void main() {
         allOf(contains('pubspec_overrides.yaml\n'), contains('.just_trash/\n')),
       );
       expect('$out', contains('Created Space Game in ${project.root}.'));
+    });
+
+    test('--local more than once links each folder, and hands each to the '
+        "kind's plugin; a package in two of them stops it first", () async {
+      final packages = checkouts();
+      final plugins = pluginCheckouts();
+      flutter = resolving(packages);
+      expect(
+        await runJust([
+          'create',
+          'space_game',
+          '--local',
+          packages.path,
+          '--local',
+          plugins.path,
+        ], context: context(tmp.path)),
+        0,
+        reason: '$err',
+      );
+      final project = JustProject('${tmp.path}/space_game');
+      expect(flutter.runs[2].arguments.where((a) => a.startsWith('--local=')), [
+        '--local=${normalPath(packages.absolute.path)}',
+        '--local=${normalPath(plugins.absolute.path)}',
+      ]);
+      expect(
+        DevLinks.linked(project)['just_world_builder_kit'],
+        '../plugins/just_world_builder_kit',
+      );
+      expect(DevLinks.linked(project), contains('just_game_engine'));
+
+      // The same package in both folders: which to link is the developer's.
+      pluginCheckout(plugins, 'just_game_engine');
+      flutter = resolving(packages);
+      expect(
+        await runJust([
+          'create',
+          'other_game',
+          '--local',
+          packages.path,
+          '--local',
+          plugins.path,
+        ], context: context(tmp.path)),
+        1,
+      );
+      expect(
+        '$err',
+        contains('just_game_engine is checked out in more than one folder'),
+      );
+      expect(flutter.runs, isEmpty, reason: 'nothing was created');
+      expect(Directory('${tmp.path}/other_game').existsSync(), isFalse);
     });
 
     test('with --json the tools print to stderr, and the hook gets --yes, '
@@ -592,6 +657,53 @@ void main() {
         0,
       );
       expect(DevLinks.linked(project), isEmpty);
+    });
+
+    test('links the checkouts of several folders; a package in two of them '
+        'is refused, and the links stay as they were', () async {
+      final packages = checkouts();
+      final plugins = pluginCheckouts();
+      flutter = resolving(packages);
+      expect(
+        await runJust([
+          'dev',
+          'link',
+          packages.path,
+          plugins.path,
+        ], context: context(project.root)),
+        0,
+        reason: '$err',
+      );
+      expect(DevLinks.linked(project), hasLength(7));
+      expect(
+        DevLinks.linked(project)['just_world_builder_kit'],
+        '../plugins/just_world_builder_kit',
+      );
+
+      pluginCheckout(plugins, 'just_game_engine');
+      final before = project.readText(JustProject.overrides);
+      expect(
+        await runJust([
+          'dev',
+          'link',
+          packages.path,
+          plugins.path,
+        ], context: context(project.root)),
+        1,
+      );
+      expect(
+        '$err',
+        contains('just_game_engine is checked out in more than one folder'),
+      );
+      expect(project.readText(JustProject.overrides), before);
+    });
+
+    test('needs at least one folder', () async {
+      expect(
+        await runJust(['dev', 'link'], context: context(project.root)),
+        isNot(0),
+      );
+      expect('$err', contains('Name the folders holding the checkouts.'));
     });
 
     test("each plugin's link hook gets every checkout; one that may not run "

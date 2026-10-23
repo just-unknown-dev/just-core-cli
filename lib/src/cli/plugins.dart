@@ -310,13 +310,14 @@ abstract final class PluginTrust {
   /// `just_something` is asked about like any other.
   static const Set<String> official = {
     'just_asset_store',
-    'just_asset_store_editor',
     'just_audio_engine',
+    'just_box_2d',
     'just_core_cli',
     'just_colours',
     'just_dart',
     'just_debugger',
     'just_deflate',
+    'just_editor_core',
     'just_game_engine',
     'just_game_engine_cli',
     'just_game_engine_editor',
@@ -327,12 +328,14 @@ abstract final class PluginTrust {
     'just_input_editor',
     'just_inputs',
     'just_jolt',
+    'just_material_editor',
     'just_physics_engine',
     'just_platformer_kit',
     'just_sprite_editor',
     'just_third_person_kit',
     'just_tiled',
     'just_ui_editor',
+    'just_world_builder_kit',
     'just_zstd',
   };
 

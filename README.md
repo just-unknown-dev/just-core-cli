@@ -22,13 +22,13 @@ cd my_game
 just check                          # every installed plugin's checks
 just doctor                         # Flutter, the tools, links, then each plugin's checks
 just upgrade                        # the tools, each plugin's packages, then its migrations
-just dev link ../packages           # point the project at local checkouts
+just dev link ../packages ../plugins  # point the project at local checkouts
 just dev unlink
 just version
 just help game run                  # a plugin command's own help
 ```
 
-`create <folder>` takes `--kind`, `--template`, `--title`, `--org`, `--platforms`, `--local <packages folder>` and `--source <catalog>`. It runs `flutter create`, writes `just.json`, adds just_core_cli and the kind's plugin to the dev dependencies as pub.dev versions (with `--local`, `pubspec_overrides.yaml` also points every just_* package in that folder at its checkout), fetches the packages, and hands the project to the plugin's `create` hook. On a failure the folder is deleted when `create` made it, or emptied when it was there already, empty; anything that can't be deleted (a file in use) is named.
+`create <folder>` takes `--kind`, `--template`, `--title`, `--org`, `--platforms`, `--local <folder>` (once for each folder of checkouts) and `--source <catalog>`. It runs `flutter create`, writes `just.json`, adds just_core_cli and the kind's plugin to the dev dependencies as pub.dev versions (with `--local`, `pubspec_overrides.yaml` also points every just_* package in those folders at its checkout; a package checked out in two of them is refused), fetches the packages, and hands the project to the plugin's `create` hook. On a failure the folder is deleted when `create` made it, or emptied when it was there already, empty; anything that can't be deleted (a file in use) is named.
 
 Every command takes `--json` (one JSON document on stdout, messages on stderr), `--yes` (go ahead without asking, for scripts and CI), `--verbose` and `--project <folder>` (a folder without a `pubspec.yaml` is no project), before or after its name but before a `--`.
 
@@ -58,7 +58,7 @@ A manifest's `hooks` name the plugin's commands for six moments. They run under 
 
 | Hook | When | Contract |
 |---|---|---|
-| `create` | `just create`, in the new project | Fill it in. Gets `--title=…`, `--org=…`, `--platforms=…`, `--template=…`, `--source=…`, `--local=…` as given, `--yes` only when the user gave it. Must keep just_core_cli and itself in `dev_dependencies`, one line each, so `upgrade` can move them. |
+| `create` | `just create`, in the new project | Fill it in. Gets `--title=…`, `--org=…`, `--platforms=…`, `--template=…`, `--source=…`, `--local=…` (one for each folder) as given, `--yes` only when the user gave it. Must keep just_core_cli and itself in `dev_dependencies`, one line each, so `upgrade` can move them. |
 | `check` | `just check` | Exit 0 when all is well. `just check` fails when nothing was checked. |
 | `doctor` | `just doctor` | The plugin's own checks. |
 | `upgrade` | `just upgrade`, in its transaction | Move the plugin's own packages: one-line constraint bumps in `pubspec.yaml`, no `pub get`, no other file, no lock. `--check` changes nothing; its document lists `packages: {name: {from, to}}`. |

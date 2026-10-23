@@ -1,3 +1,9 @@
+## 0.1.2
+
+- **Checkouts in several folders.** `just dev link` takes one or more folders (`just dev link ../packages ../plugins`), and `just create --local` may be given more than once, so a workspace can keep its pub.dev packages and its store plugins apart. Each folder goes to the kind's `create` hook as its own `--local=…`. A package checked out in two of the folders is refused, naming both, before anything changes. `DevLinks.scanAll` and `DevLinkClash` are the library side.
+- `PluginTrust.official` no longer lists just_asset_store_editor: the package is retired (the Asset Store's window is part of just_game_engine_editor from 0.1.0-dev.2), and a package published under its name now is asked about like any other.
+- `PluginTrust.official` lists the ecosystem's packages it was missing: just_box_2d, just_editor_core, just_material_editor and just_world_builder_kit. From a local checkout or the ecosystem's repositories they run without asking, as the others do.
+
 ## 0.1.1
 
 - **just_asset_store from pub.dev is the ecosystem's own.** `PluginTrust.onPubDev` lists it: `just` runs the Asset Store's commands from a pub.dev install without asking, as it does just_game_engine_cli's. It is published right after this release.

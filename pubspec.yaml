@@ -1,6 +1,6 @@
 name: just_core_cli
 description: "The core of `just` (also `ju`), the Just ecosystem's command-line tool: projects, plugins and hooks, version sets, safe pubspec edits, transactions and downloads."
-version: 0.1.1
+version: 0.1.2
 homepage: https://github.com/just-unknown-dev/just-core-cli
 repository: https://github.com/just-unknown-dev/just-core-cli
 issue_tracker: https://github.com/just-unknown-dev/just-core-cli/issues

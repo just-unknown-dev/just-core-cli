@@ -30,8 +30,9 @@ final class DevCommand extends JustCommand {
       'checkouts.';
 }
 
-/// `just dev link <packages folder>`: path overrides to the local
-/// checkouts in `pubspec_overrides.yaml`, fetched all or nothing — then each
+/// `just dev link <folder>...`: path overrides to the local checkouts in
+/// each folder (say a workspace's `packages/` and `plugins/`) in
+/// `pubspec_overrides.yaml`, fetched all or nothing — then each
 /// plugin's `link` hook, with `<name>=<path>` for every checkout.
 final class DevLinkCommand extends JustCommand {
   @override
@@ -44,18 +45,28 @@ final class DevLinkCommand extends JustCommand {
       'with them (its `link` hook).';
 
   @override
-  String get invocation => '${context.invokedAs} dev link <packages folder>';
+  String get invocation =>
+      '${context.invokedAs} dev link <folder> [<folder>...]';
 
   @override
   Future<int> run() async {
     final project = requireProject();
-    final arg = singleArgument('the folder holding the checkouts');
-    final folder = File(arg).isAbsolute
-        ? arg
-        : '${context.workingDirectory}/$arg';
-    final checkouts = DevLinks.scan(Directory(folder));
+    final args = argResults!.rest;
+    if (args.isEmpty) {
+      throw UsageFailure('Name the folders holding the checkouts.');
+    }
+    final folders = [
+      for (final arg in args)
+        File(arg).isAbsolute ? arg : '${context.workingDirectory}/$arg',
+    ];
+    final List<Checkout> checkouts;
+    try {
+      checkouts = DevLinks.scanAll([for (final f in folders) Directory(f)]);
+    } on DevLinkClash catch (e) {
+      throw CommandFailure('$e');
+    }
     if (checkouts.isEmpty) {
-      throw CommandFailure('No just_* packages in $folder.');
+      throw CommandFailure('No just_* packages in ${folders.join(', ')}.');
     }
     final before = DevLinks.linked(project);
     final text = DevLinks.overridesText(project, checkouts);

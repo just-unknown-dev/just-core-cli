@@ -20,7 +20,7 @@ import 'hooks.dart';
 /// `just create <folder> [--kind <kind>]`: `flutter create`, then `just.json`
 /// and the tools — just_core_cli and the kind's plugin — as plain dev
 /// dependencies on pub.dev versions (with `--local`, `pubspec_overrides.yaml`
-/// also points every just_* package in that folder at its checkout), then
+/// also points every just_* package in those folders at its checkout), then
 /// the kind's plugin fills the project in: its `create` hook. On a failure
 /// the folder is deleted when this run made it, or emptied when it was
 /// there already, empty; anything that can't be deleted (a file in use) is
@@ -29,9 +29,9 @@ import 'hooks.dart';
 /// The hook owns the pubspec from then on, and must keep those two dev
 /// dependencies, on one line each, so `just upgrade` can move them. It gets
 /// `--title`, `--org`, `--platforms`, `--template`, `--source` and
-/// `--local` as given, each as one `--name=value` argument (so a value that
-/// starts with `-` stays a value), and `--yes`, `--json` and `--verbose`
-/// only when the run had them. The versions of its own packages are the
+/// `--local` (one for each folder) as given, each as one `--name=value`
+/// argument (so a value that starts with `-` stays a value), and `--yes`,
+/// `--json` and `--verbose` only when the run had them. The versions of its own packages are the
 /// plugin's to choose; `just.json`'s `set` is the tool set's id.
 final class CreateCommand extends JustCommand {
   /// The command and its options.
@@ -71,12 +71,14 @@ final class CreateCommand extends JustCommand {
         defaultsTo: 'windows,macos,linux,android,ios,web',
         help: 'The platforms to create, separated by commas.',
       )
-      ..addOption(
+      ..addMultiOption(
         'local',
-        valueHelp: 'packages folder',
+        valueHelp: 'folder',
+        splitCommas: false,
         help:
             "Point the ecosystem's packages at local checkouts in this folder "
-            '(pubspec_overrides.yaml), for working on the ecosystem.',
+            '(pubspec_overrides.yaml), for working on the ecosystem; repeat '
+            'for several, such as packages/ and plugins/.',
       )
       ..addMultiOption(
         'source',
@@ -140,21 +142,25 @@ final class CreateCommand extends JustCommand {
         set[name] ?? (throw StateError('The ${set.id} set has no $name.')),
     ];
 
-    final local = argResults!.option('local');
-    final localDir = local == null
-        ? null
-        : normalPath(
-            Directory(
-              File(local).isAbsolute
-                  ? local
-                  : '${context.workingDirectory}/$local',
-            ).absolute.path,
-          );
-    final checkouts = localDir == null
-        ? const <Checkout>[]
-        : DevLinks.scan(Directory(localDir));
-    if (local != null && checkouts.isEmpty) {
-      throw CommandFailure('No just_* packages in $local.');
+    final locals = argResults!.multiOption('local');
+    final localDirs = [
+      for (final local in locals)
+        normalPath(
+          Directory(
+            File(local).isAbsolute
+                ? local
+                : '${context.workingDirectory}/$local',
+          ).absolute.path,
+        ),
+    ];
+    final List<Checkout> checkouts;
+    try {
+      checkouts = DevLinks.scanAll([for (final d in localDirs) Directory(d)]);
+    } on DevLinkClash catch (e) {
+      throw CommandFailure('$e');
+    }
+    if (locals.isNotEmpty && checkouts.isEmpty) {
+      throw CommandFailure('No just_* packages in ${locals.join(', ')}.');
     }
     final sdk = await SdkLocator.find(
       context.workingDirectory,
@@ -176,7 +182,7 @@ final class CreateCommand extends JustCommand {
         names,
         set,
         tools,
-        localDir,
+        localDirs,
         checkouts,
       );
       final plugin = _kindPlugin(project, pluginName, kind);
@@ -194,7 +200,7 @@ final class CreateCommand extends JustCommand {
           '--platforms=${argResults!.option('platforms')!}',
           if (template != null) '--template=$template',
           for (final s in argResults!.multiOption('source')) '--source=$s',
-          if (localDir != null) '--local=$localDir',
+          for (final d in localDirs) '--local=$d',
           // Only when given: without it the hook may still ask, in a
           // terminal, whether to trust a plugin it calls.
           if (yes) '--yes',
@@ -248,7 +254,7 @@ final class CreateCommand extends JustCommand {
   }
 
   /// `flutter create`, then `just.json`, the [tools] as dev dependencies,
-  /// the links to [checkouts] (in [localDir]) and `pub get`: a project the
+  /// the links to [checkouts] (in [localDirs]) and `pub get`: a project the
   /// kind's plugin can run in.
   Future<JustProject> _flutterCreate(
     FlutterSdk sdk,
@@ -256,7 +262,7 @@ final class CreateCommand extends JustCommand {
     ProjectNames names,
     ToolSet set,
     List<SetPackage> tools,
-    String? localDir,
+    List<String> localDirs,
     List<Checkout> checkouts,
   ) async {
     final quiet = output.json;
@@ -305,7 +311,9 @@ final class CreateCommand extends JustCommand {
       ),
     );
     if (checkouts.isNotEmpty) {
-      output.info('Linking ${checkouts.length} packages in $localDir…');
+      output.info(
+        'Linking ${checkouts.length} packages in ${localDirs.join(', ')}…',
+      );
       writeTextAtomic(
         project.file(JustProject.overrides),
         DevLinks.overridesText(project, checkouts),

@@ -29,7 +29,7 @@ final class UnsafePathException implements Exception {
 abstract final class SafePaths {
   /// The longest path accepted, in characters. Windows' classic limit is
   /// 260 for the whole path; this leaves room for the project folder and
-  /// `packages/<category>/<name>/` in front of it.
+  /// `packages/<category>/<name>/` (or `plugins/…`) in front of it.
   static const int maxLength = 180;
 
   /// [path] if it is safe, else throws [UnsafePathException].

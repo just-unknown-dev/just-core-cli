@@ -18,6 +18,24 @@ final class Checkout {
   final String path;
 }
 
+/// The same package checked out in more than one of the folders given to
+/// [DevLinks.scanAll].
+final class DevLinkClash implements Exception {
+  /// [name], found at each of [paths].
+  const DevLinkClash(this.name, this.paths);
+
+  /// The package's name.
+  final String name;
+
+  /// Its checkouts.
+  final List<String> paths;
+
+  @override
+  String toString() =>
+      '$name is checked out in more than one folder (${paths.join(', ')}). '
+      'Delete the copy you no longer use, or link only the folders you mean.';
+}
+
 /// Path overrides from a project to local checkouts, in `just dev link`'s
 /// own block of `pubspec_overrides.yaml` — never `pubspec.yaml`, because the
 /// paths are this machine's.
@@ -42,6 +60,24 @@ abstract final class DevLinks {
     }
     out.sort((a, b) => a.name.compareTo(b.name));
     return out;
+  }
+
+  /// The ecosystem packages in each of [dirs] — say a workspace's
+  /// `packages/` and `plugins/` — in name order. A package checked out in
+  /// two of them throws [DevLinkClash]: which one to link is for the
+  /// developer to say.
+  static List<Checkout> scanAll(Iterable<Directory> dirs) {
+    final byName = <String, Checkout>{};
+    for (final dir in dirs) {
+      for (final c in scan(dir)) {
+        final seen = byName[c.name];
+        if (seen != null && seen.path != c.path) {
+          throw DevLinkClash(c.name, [seen.path, c.path]);
+        }
+        byName[c.name] = c;
+      }
+    }
+    return byName.values.toList()..sort((a, b) => a.name.compareTo(b.name));
   }
 
   /// [path]'s path from [project]: relative when it can be, so a project
