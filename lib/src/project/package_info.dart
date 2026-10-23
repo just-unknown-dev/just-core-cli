@@ -143,7 +143,8 @@ final class GraphNode {
 /// version — what a tool checks constraints against, since overrides
 /// skip pub's own checks.
 final class PackageGraph {
-  const PackageGraph._(this.roots, this.nodes);
+  /// A graph of [nodes], [roots] being the project's own packages.
+  const PackageGraph(this.roots, this.nodes);
 
   /// The project's graph, or null when pub has not written one. For a
   /// member of a pub workspace it is the workspace's.
@@ -163,7 +164,7 @@ final class PackageGraph {
         [for (final d in _list(p['devDependencies'])) '$d'],
       );
     }
-    return PackageGraph._([for (final r in _list(json['roots'])) '$r'], nodes);
+    return PackageGraph([for (final r in _list(json['roots'])) '$r'], nodes);
   }
 
   /// The project's own package (and workspace members).

@@ -81,6 +81,48 @@ void main() {
           } on Object {
             return;
           }
+        case '/ranged' || '/ranged-wrong' || '/ranged-short':
+          // 100 bytes, 0..99, served by Range as a file server would — or
+          // with the wrong Content-Range, or a byte short.
+          final data = List<int>.generate(100, (i) => i);
+          final m = RegExp(
+            r'^bytes=(\d*)-(\d*)$',
+          ).firstMatch(request.headers.value('range') ?? '');
+          if (m == null) {
+            r.add(data);
+            break;
+          }
+          int start;
+          var end = 99;
+          if (m[1]!.isEmpty) {
+            start = 100 - int.parse(m[2]!);
+            if (start < 0) start = 0;
+          } else {
+            start = int.parse(m[1]!);
+            if (m[2]!.isNotEmpty && int.parse(m[2]!) < 99) {
+              end = int.parse(m[2]!);
+            }
+          }
+          if (start > 99) {
+            r.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+            r.headers.set('content-range', 'bytes */100');
+            break;
+          }
+          final wrong = request.uri.path == '/ranged-wrong' ? 1 : 0;
+          final short = request.uri.path == '/ranged-short' ? 1 : 0;
+          r.statusCode = HttpStatus.partialContent;
+          r.headers.set('content-range', 'bytes ${start + wrong}-$end/100');
+          r.add(data.sublist(start, end + 1 - short));
+        case '/to-ranged':
+          r.statusCode = HttpStatus.found;
+          r.headers.set('location', '/ranged');
+        case '/whole':
+          // Ignores Range, as some servers do.
+          r.add(List<int>.generate(100, (i) => i));
+        case '/partial-anyway':
+          r.statusCode = HttpStatus.partialContent;
+          r.headers.set('content-range', 'bytes 0-3/100');
+          r.add([0, 1, 2, 3]);
         default:
           r.statusCode = HttpStatus.notFound;
       }
@@ -202,6 +244,95 @@ void main() {
       throwsA(isA<FetchException>()),
     );
     expect(hugeSent, lessThan(32 * 1024 * 1024));
+  });
+
+  test('decode may take its time', () async {
+    final got = await fetcher.getCached(
+      at('/index.json'),
+      cache: File('${tmp.path}/slow.json'),
+      decode: (bytes) async {
+        await Future<void>.delayed(Duration.zero);
+        return utf8.decode(bytes);
+      },
+    );
+    expect(got.text, '{"v": 1}');
+  });
+
+  group('ranges', () {
+    test('a part of a file, its end, and a part clipped at the end', () async {
+      final part = await fetcher.get(at('/ranged'), range: ByteRange(10, 19));
+      expect(part.status, HttpStatus.partialContent);
+      expect(part.body, List<int>.generate(10, (i) => 10 + i));
+      expect(part.range, (start: 10, end: 19, total: 100));
+
+      final tail = await fetcher.get(
+        at('/ranged'),
+        range: ByteRange.suffix(30),
+      );
+      expect(tail.body.first, 70);
+      expect(tail.body.length, 30);
+      expect(tail.range, (start: 70, end: 99, total: 100));
+
+      final clipped = await fetcher.get(
+        at('/ranged'),
+        range: ByteRange(90, 500),
+      );
+      expect(clipped.body.length, 10);
+      expect(clipped.range, (start: 90, end: 99, total: 100));
+
+      final all = await fetcher.get(at('/ranged'), range: ByteRange.suffix(500));
+      expect(all.body.length, 100);
+    });
+
+    test('follow redirects', () async {
+      final part = await fetcher.get(at('/to-ranged'), range: ByteRange(0, 3));
+      expect(part.body, [0, 1, 2, 3]);
+    });
+
+    test('a server that sends the whole file is refused, unread', () {
+      expect(
+        fetcher.get(at('/whole'), range: ByteRange(0, 3)),
+        throwsA(
+          isA<FetchException>().having((e) => e.statusCode, 'status', 200),
+        ),
+      );
+    });
+
+    test('another part, a short part and one past the end are refused', () {
+      expect(
+        fetcher.get(at('/ranged-wrong'), range: ByteRange(10, 19)),
+        throwsA(isA<FetchException>()),
+      );
+      expect(
+        fetcher.get(at('/ranged-short'), range: ByteRange(10, 19)),
+        throwsA(isA<FetchException>()),
+      );
+      expect(
+        fetcher.get(at('/ranged'), range: ByteRange(200, 300)),
+        throwsA(
+          isA<FetchException>().having((e) => e.statusCode, 'status', 416),
+        ),
+      );
+    });
+
+    test('a part nobody asked for is refused', () {
+      expect(fetcher.get(at('/partial-anyway')), throwsA(isA<FetchException>()));
+    });
+
+    test('are written as Range headers, and nonsense is refused', () {
+      expect(ByteRange(0, 9).header, 'bytes=0-9');
+      expect(ByteRange.suffix(22).header, 'bytes=-22');
+      expect(() => ByteRange(5, 4), throwsArgumentError);
+      expect(() => ByteRange(-1, 4), throwsArgumentError);
+      expect(() => ByteRange.suffix(0), throwsArgumentError);
+      final r = ByteRange(0, 9);
+      expect(r.answeredBy('bytes 0-9/100'), (start: 0, end: 9, total: 100));
+      expect(r.answeredBy('bytes 0-9/5'), isNull);
+      expect(r.answeredBy('bytes 0-4/5'), (start: 0, end: 4, total: 5));
+      expect(r.answeredBy('bytes 1-9/100'), isNull);
+      expect(r.answeredBy('bytes */100'), isNull);
+      expect(r.answeredBy(null), isNull);
+    });
   });
 
   test('only https, except to this machine', () {
@@ -331,6 +462,45 @@ void main() {
       );
     });
 
+    test('a server that keeps sending, past the deadline', () async {
+      final clock = Stopwatch()..start();
+      await expectLater(
+        fetcher.get(
+          at('/huge'),
+          maxBytes: 128 << 20,
+          deadline: const Duration(milliseconds: 300),
+        ),
+        throwsA(
+          isA<FetchException>().having(
+            (e) => e.message,
+            'message',
+            contains('took longer than'),
+          ),
+        ),
+      );
+      expect(clock.elapsed, lessThan(const Duration(seconds: 5)));
+    });
+
+    test('the deadline counts the waits between retries', () async {
+      // The server asks for 30 s; the deadline won't wait that long.
+      final clock = Stopwatch()..start();
+      await expectLater(
+        fetcher.get(at('/busy'), deadline: const Duration(seconds: 2)),
+        throwsA(
+          isA<FetchException>().having(
+            (e) => e.message,
+            'message',
+            contains('took longer'),
+          ),
+        ),
+      );
+      expect(clock.elapsed, lessThan(const Duration(seconds: 5)));
+      expect(
+        HttpFetcher.deadlineFor(512 << 20),
+        const Duration(seconds: 120 + 16384),
+      );
+    });
+
     test('a secure connection that fails', () async {
       // TLS to a plain HTTP port: a HandshakeException underneath.
       await expectLater(
@@ -446,6 +616,50 @@ void main() {
         for (var i = 0; i < 3; i++) _cacheInIsolate(dir),
       ]);
       expect(results.expand((p) => p), isEmpty);
+    });
+  });
+
+  group('HashedFiles', () {
+    Uint8List b(String s) => Uint8List.fromList(utf8.encode(s));
+
+    test('read checks the bytes again, and drops a damaged copy', () {
+      final files = HashedFiles('${tmp.path}/pieces', ext: 'json');
+      final one = b('{"one": 1}');
+      final sha = Sha256.hexOf(one);
+      expect(files.read(sha), isNull);
+      files.write(sha, one);
+      expect(files.read(sha), one);
+      expect(files.fileFor(sha).path, endsWith('/pieces/$sha.json'));
+      files.fileFor(sha).writeAsStringSync('{"one": 2}');
+      expect(files.read(sha), isNull);
+      expect(files.fileFor(sha).existsSync(), isFalse);
+    });
+
+    test('retainOnly deletes only its own unwanted files', () {
+      final files = HashedFiles('${tmp.path}/pieces', ext: 'json');
+      final keep = b('keep');
+      final drop = b('drop');
+      files
+        ..write(Sha256.hexOf(keep), keep)
+        ..write(Sha256.hexOf(drop), drop);
+      final other = File('${tmp.path}/pieces/notes.txt')
+        ..writeAsStringSync('mine');
+      final otherKind = File('${tmp.path}/pieces/${'a' * 64}.zip')
+        ..writeAsStringSync('zip');
+      files.retainOnly({Sha256.hexOf(keep)});
+      expect(files.read(Sha256.hexOf(keep)), keep);
+      expect(files.fileFor(Sha256.hexOf(drop)).existsSync(), isFalse);
+      expect(other.existsSync(), isTrue);
+      expect(otherKind.existsSync(), isTrue);
+      // A folder that isn't there yet is fine.
+      HashedFiles('${tmp.path}/none').retainOnly(const {});
+    });
+
+    test('names are SHA-256s and extensions are plain', () {
+      final files = HashedFiles(tmp.path);
+      expect(() => files.fileFor('../x'), throwsArgumentError);
+      expect(() => HashedFiles(tmp.path, ext: '../x'), throwsArgumentError);
+      expect(() => HashedFiles(tmp.path, ext: ''), throwsArgumentError);
     });
   });
 

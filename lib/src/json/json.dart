@@ -214,8 +214,12 @@ final class JsonFields {
 /// [value] as the ecosystem's tools write every JSON file: keys sorted, two-space
 /// indents, LF line endings and a final newline. The same data always
 /// gives the same bytes, so files diff cleanly and hash stably.
-String canonicalJson(Object? value) =>
-    '${const JsonEncoder.withIndent('  ').convert(_sorted(value))}\n';
+///
+/// Not [pretty]: on one line, for files only programs read (a published
+/// catalog's pieces), still with keys sorted and a final newline.
+String canonicalJson(Object? value, {bool pretty = true}) => pretty
+    ? '${const JsonEncoder.withIndent('  ').convert(_sorted(value))}\n'
+    : '${jsonEncode(_sorted(value))}\n';
 
 Object? _sorted(Object? value) {
   if (value is Map) {

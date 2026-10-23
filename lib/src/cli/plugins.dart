@@ -24,14 +24,16 @@ enum PluginScope {
 /// Where pub got a plugin's package from, as the `pubspec.lock` that
 /// resolved it says.
 final class PluginSource {
-  /// A package from [kind] (`path`, `git`, `hosted`, `sdk` or `unknown`),
-  /// at [url] (git and hosted) or [path] (path, absolute).
+  /// A package from [kind] (`path`, `git`, `hosted`, `sdk`, `store` or
+  /// `unknown`), at [url] (git and hosted) or [path] (path and store,
+  /// absolute). `store` is a path package the Asset Store copied in as a
+  /// community item.
   const PluginSource(this.kind, {this.url, this.path});
 
   /// A package whose source no lockfile names.
   static const PluginSource unknown = PluginSource('unknown');
 
-  /// `path`, `git`, `hosted`, `sdk`, or `unknown`.
+  /// `path`, `git`, `hosted`, `sdk`, `store`, or `unknown`.
   final String kind;
 
   /// The repository (git) or the package server (hosted).
@@ -192,7 +194,8 @@ abstract final class PluginFinder {
     if (config == null) return const [];
     final lock = PluginSource.readLock('${config.root}/pubspec.lock');
     final resolvedIn = JustProject(config.root);
-    PluginSource sourceOf(ResolvedPackage p) {
+    final installed = storeInstalled(project.root);
+    PluginSource lockedSourceOf(ResolvedPackage p) {
       // The project itself is a local folder, whatever the lock says.
       if (samePath(p.rootPath, project.root)) {
         return PluginSource('path', path: project.root);
@@ -206,11 +209,53 @@ abstract final class PluginFinder {
           : PluginSource.unknown;
     }
 
+    PluginSource sourceOf(ResolvedPackage p) {
+      final source = lockedSourceOf(p);
+      final path = source.path;
+      // A community item the store copied in is a folder too, yet nobody
+      // vouches for it: an ecosystem name doesn't make it one of ours.
+      if (source.kind == 'path' &&
+          path != null &&
+          installed.any((f) => JustProject(f).relativeOf(path) != null)) {
+        return PluginSource('store', path: path);
+      }
+      return source;
+    }
+
     return _from(
       [for (final p in config.packages.values) (p, sourceOf(p))],
       PluginScope.project,
       problems,
     );
+  }
+
+  /// The Asset Store's lockfile, in a project's root.
+  static const String storeLockFile = 'just_store.lock.json';
+
+  /// The folders of the community items the Asset Store installed into the
+  /// project at [root], as its [storeLockFile] lists them: every copied-in
+  /// item it doesn't record as official. When that file can't be read,
+  /// every folder the store installs into (`plugins/`, `packages/`).
+  static List<String> storeInstalled(String root) {
+    final file = File('$root/$storeLockFile');
+    if (!file.existsSync()) return const [];
+    String folder(String relative) => normalPath(
+      Directory('$root/$relative').absolute.uri.normalizePath().toFilePath(),
+    );
+    try {
+      final items = (jsonDecode(file.readAsStringSync()) as Map)['items'];
+      if (items == null) return const [];
+      return [
+        for (final item in (items as Map).values)
+          if (item is Map &&
+              item['origin'] == 'vendored' &&
+              item['official'] != true &&
+              item['path'] is String)
+            folder(item['path'] as String),
+      ];
+    } on Object {
+      return [folder('plugins'), folder('packages')];
+    }
   }
 
   /// The plugins activated with `dart pub global activate`, from pub's

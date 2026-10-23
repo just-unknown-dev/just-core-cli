@@ -187,6 +187,7 @@ bool mayRunPlugin(
 String _from(PluginSource source) => switch (source.kind) {
   'hosted' => 'a package server (${source.url ?? 'pub.dev'})',
   'git' => 'the git repository ${source.url}',
+  'store' => 'a community item the Asset Store installed',
   'unknown' => 'a source no pubspec.lock names',
   final kind => kind,
 };

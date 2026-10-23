@@ -653,6 +653,43 @@ void main() {
       },
     );
 
+    test('a community item the store copied in is not an ecosystem '
+        'checkout, whatever its name', () async {
+      resolve(project, [package('just_asset_store', manifest: store)]);
+      lock(project, {'just_asset_store': 'path'});
+      final storeLock = File('${project.path}/just_store.lock.json');
+      void installed({required bool official}) => storeLock.writeAsStringSync(
+        jsonEncode({
+          'items': {
+            'just_asset_store': {
+              'version': '1.0.0',
+              'kind': 'tool',
+              'origin': 'vendored',
+              'path': '../pkgs/just_asset_store',
+              'official': official ? true : null,
+            },
+          },
+        }),
+      );
+
+      installed(official: false);
+      expect(await runJust(['store', 'list'], context: context()), 1);
+      expect(launcher.runs, isEmpty);
+      expect('$err', contains('a community item the Asset Store installed'));
+
+      installed(official: true);
+      expect(await runJust(['store', 'list'], context: context()), 0);
+      expect(launcher.runs, hasLength(1));
+
+      // A lockfile that can't be read vouches for nothing it installed.
+      storeLock.writeAsStringSync('{');
+      expect(
+        PluginFinder.storeInstalled(project.path),
+        hasLength(2),
+        reason: 'plugins/ and packages/',
+      );
+    });
+
     test('which sources count as the ecosystem', () {
       Plugin plugin(String name, PluginSource source) => Plugin(
         package: name,

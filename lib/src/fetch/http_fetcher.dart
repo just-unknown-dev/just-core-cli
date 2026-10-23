@@ -31,10 +31,12 @@ final class FetchException implements Exception {
 
 /// What a server answered.
 final class FetchResponse {
-  /// A response with [status], [body] and the [etag] it gave.
-  const FetchResponse(this.status, this.body, this.etag);
+  /// A response with [status], [body] and the [etag] it gave, and — for a
+  /// part of a file — the [range] it holds.
+  const FetchResponse(this.status, this.body, this.etag, {this.range});
 
-  /// The HTTP status: 200, or 304 for an unchanged cached copy.
+  /// The HTTP status: 200; 206 for the part of a file a [ByteRange] asked
+  /// for; or 304 for an unchanged cached copy.
   final int status;
 
   /// The bytes; empty for a 304.
@@ -42,6 +44,66 @@ final class FetchResponse {
 
   /// The `ETag` header, when there was one.
   final String? etag;
+
+  /// For a 206: which bytes of the file [body] holds (both ends included)
+  /// and how long the whole file is.
+  final ({int start, int end, int total})? range;
+}
+
+/// A part of a file to fetch: an HTTP `Range` of bytes, so a tool can read
+/// a zip's directory, or one file in it, without downloading all of it.
+final class ByteRange {
+  /// Bytes [start] to [end], both included.
+  ByteRange(int start, int end) : _start = start, _end = end, _suffix = null {
+    if (start < 0 || end < start) {
+      throw ArgumentError('Not a byte range: $start-$end.');
+    }
+  }
+
+  /// The last [length] bytes of the file (all of it, when it is shorter).
+  ByteRange.suffix(int length) : _start = null, _end = null, _suffix = length {
+    if (length < 1) throw ArgumentError('Not a byte range: the last $length.');
+  }
+
+  final int? _start;
+  final int? _end;
+  final int? _suffix;
+
+  /// How many bytes it asks for, at most.
+  int get length => _suffix ?? _end! - _start! + 1;
+
+  /// The `Range` header asking for it.
+  String get header =>
+      _suffix != null ? 'bytes=-$_suffix' : 'bytes=$_start-$_end';
+
+  /// What a `Content-Range` header ([contentRange]) says was sent, when it
+  /// is exactly this part of the file — clipped to the file's end, as a
+  /// server does; null when it is anything else.
+  ({int start, int end, int total})? answeredBy(String? contentRange) {
+    final m = RegExp(
+      r'^bytes (\d{1,18})-(\d{1,18})/(\d{1,18})$',
+    ).firstMatch(contentRange?.trim() ?? '');
+    if (m == null) return null;
+    final first = int.parse(m[1]!);
+    final last = int.parse(m[2]!);
+    final total = int.parse(m[3]!);
+    if (last < first || last >= total) return null;
+    final suffix = _suffix;
+    final int wantFirst;
+    final int wantLast;
+    if (suffix != null) {
+      wantFirst = total > suffix ? total - suffix : 0;
+      wantLast = total - 1;
+    } else {
+      wantFirst = _start!;
+      wantLast = _end! < total ? _end : total - 1;
+    }
+    if (first != wantFirst || last != wantLast) return null;
+    return (start: first, end: last, total: total);
+  }
+
+  @override
+  String toString() => header;
 }
 
 /// Text fetched through an on-disk copy: fresh when the server answered,
@@ -77,7 +139,9 @@ bool isFetchAllowed(Uri uri) {
 /// - Only `https:` (plain `http:` to this machine, for testing a catalog
 ///   locally) — for the address asked for and for every redirect; a fetch
 ///   that began on `https:` never follows a redirect to `http:`.
-/// - Up to 5 redirects; 20 s to connect, [timeout] of silence at most.
+/// - Up to 5 redirects; 20 s to connect, [timeout] of silence at most,
+///   and a deadline for the whole fetch ([deadlineFor]): a server that
+///   sends a byte now and then can't keep it going for ever.
 ///   Credentials and cookies in the headers only go to the address's own
 ///   origin.
 /// - Waits and retries, up to 3 times, when a server says to slow down
@@ -114,35 +178,75 @@ final class HttpFetcher {
   /// The largest text [getCached] reads unless told otherwise: 64 MiB.
   static const int defaultMaxTextBytes = 64 << 20;
 
+  /// The slowest a download may average before its deadline passes:
+  /// 32 KiB a second, a slow mobile connection.
+  static const int minBytesPerSecond = 32 << 10;
+
+  /// How long a fetch of up to [maxBytes] may take in all, retries and
+  /// redirects included: two minutes, and as long again as [maxBytes]
+  /// takes at [minBytesPerSecond].
+  static Duration deadlineFor(int maxBytes) =>
+      Duration(seconds: 120 + maxBytes ~/ minBytesPerSecond);
+
   /// GETs [uri] with [headers]. A 304 (the `If-None-Match` copy is still
   /// good) comes back with an empty body; any other status but 200 throws a
   /// [FetchException], as does a body over [maxBytes] ([defaultMaxBytes]
   /// when null), a redirect away from `https:`, a timeout and a failed
   /// connection.
+  ///
+  /// With [range], only that part of the file is asked for, and only a 206
+  /// holding exactly that part (as its `Content-Range` says) is accepted. A
+  /// server that sends the whole file instead (200) is refused before its
+  /// body is read — a [FetchException] with status 200, which tells the
+  /// caller to download the file in full instead.
+  ///
+  /// The whole fetch fails once [deadline] passes ([deadlineFor] the
+  /// limit, when null).
   Future<FetchResponse> get(
     Uri uri, {
     Map<String, String> headers = const {},
     ByteProgress? onProgress,
     CancelToken? cancel,
     int? maxBytes,
+    ByteRange? range,
+    Duration? deadline,
   }) async {
     if (!isFetchAllowed(uri)) {
       throw FetchException('Downloads must use https.', uri: uri);
     }
+    final limit = maxBytes ?? defaultMaxBytes;
+    final allowed = deadline ?? deadlineFor(range?.length ?? limit);
+    final clock = Stopwatch()..start();
+    final sent = range == null ? headers : {...headers, 'Range': range.header};
     for (var attempt = 1; ; attempt++) {
       cancel?.check();
+      final left = allowed - clock.elapsed;
+      if (left <= Duration.zero) throw _late(uri, allowed);
       final (response, retryAfter) = await _attempt(
         uri,
-        headers: headers,
+        headers: sent,
         onProgress: onProgress,
         cancel: cancel,
-        maxBytes: maxBytes ?? defaultMaxBytes,
+        maxBytes: limit,
+        range: range,
         attempt: attempt,
+        left: left,
+        late: () => _late(uri, allowed),
       );
       if (response != null) return response;
-      await _pause(retryAfter!, cancel);
+      if (clock.elapsed + retryAfter! >= allowed) throw _late(uri, allowed);
+      await _pause(retryAfter, cancel);
     }
   }
+
+  static FetchException _late(Uri uri, Duration allowed) => FetchException(
+    'The download took longer than ${_span(allowed)}, so it was stopped.',
+    uri: uri,
+  );
+
+  static String _span(Duration d) => d.inSeconds < 120
+      ? '${d.inSeconds} seconds'
+      : '${(d.inSeconds / 60).round()} minutes';
 
   /// One request, with its redirects: the response, or how long to wait
   /// before asking again.
@@ -152,7 +256,10 @@ final class HttpFetcher {
     required ByteProgress? onProgress,
     required CancelToken? cancel,
     required int? maxBytes,
+    required ByteRange? range,
     required int attempt,
+    required Duration left,
+    required FetchException Function() late,
   }) async {
     final client = _client()
       ..connectionTimeout = const Duration(seconds: 20)
@@ -160,6 +267,12 @@ final class HttpFetcher {
     HttpClientRequest? current;
     final stopListening = cancel?.onCancel(() {
       current?.abort(const CancelledException());
+      client.close(force: true);
+    });
+    var overdue = false;
+    final deadline = Timer(left, () {
+      overdue = true;
+      current?.abort(late());
       client.close(force: true);
     });
     try {
@@ -176,7 +289,37 @@ final class HttpFetcher {
       if (status == HttpStatus.notModified) {
         return (FetchResponse(status, Uint8List(0), null), null);
       }
-      if (status != HttpStatus.ok) {
+      ({int start, int end, int total})? part;
+      if (range != null) {
+        if (status == HttpStatus.ok) {
+          throw FetchException(
+            'The server sent the whole file, not the part asked for.',
+            uri: uri,
+            statusCode: status,
+          );
+        }
+        if (status == HttpStatus.requestedRangeNotSatisfiable) {
+          throw FetchException(
+            'The part asked for ($range) is not in the file.',
+            uri: uri,
+            statusCode: status,
+          );
+        }
+        if (status == HttpStatus.partialContent) {
+          part = range.answeredBy(
+            response.headers.value(HttpHeaders.contentRangeHeader),
+          );
+          if (part == null) {
+            throw FetchException(
+              'The server sent another part of the file than the one asked '
+              'for ($range).',
+              uri: uri,
+              statusCode: status,
+            );
+          }
+        }
+      }
+      if (status != HttpStatus.ok && part == null) {
         throw FetchException(
           switch (status) {
             404 => 'Not found.',
@@ -203,21 +346,33 @@ final class HttpFetcher {
         }
         onProgress?.call(out.length, total);
       }
+      if (part != null && out.length != part.end - part.start + 1) {
+        throw FetchException(
+          'The server sent ${out.length} bytes for a part of '
+          '${part.end - part.start + 1}.',
+          uri: uri,
+          statusCode: status,
+        );
+      }
       return (
         FetchResponse(
           status,
           out.takeBytes(),
           response.headers.value(HttpHeaders.etagHeader),
+          range: part,
         ),
         null,
       );
     } on Object catch (e) {
-      if (e is FetchException || e is CancelledException) rethrow;
+      if (e is CancelledException) rethrow;
       if (cancel?.isCancelled ?? false) throw const CancelledException();
+      if (overdue) throw late();
+      if (e is FetchException) rethrow;
       final message = _failureMessage(e);
       if (message == null) rethrow;
       throw FetchException(message, uri: uri);
     } finally {
+      deadline.cancel();
       stopListening?.call();
       client.close(force: true);
     }
@@ -309,8 +464,9 @@ final class HttpFetcher {
   /// The text at [uri], kept in [cache] (with its ETag beside it) so an
   /// unchanged file costs one small request and the last copy still reads
   /// offline. [refresh] asks again even when the copy would do. [decode]
-  /// turns the bytes into text, and may throw an [Exception] to refuse
-  /// them; the cached copy is then used, as when offline.
+  /// turns the bytes into text — it may take its time (fetching what the
+  /// text names, say) — and may throw an [Exception] to refuse them; the
+  /// cached copy is then used, as when offline.
   ///
   /// The text may be [maxBytes] long ([defaultMaxTextBytes] when null);
   /// [cancel] stops the request (a cancelled one never falls back on the
@@ -321,7 +477,7 @@ final class HttpFetcher {
   Future<CachedText> getCached(
     Uri uri, {
     required File? cache,
-    required String Function(Uint8List bytes) decode,
+    required FutureOr<String> Function(Uint8List bytes) decode,
     bool refresh = false,
     int? maxBytes,
     CancelToken? cancel,
@@ -350,7 +506,7 @@ final class HttpFetcher {
     }
     final String text;
     try {
-      text = decode(response.body);
+      text = await decode(response.body);
     } on Exception catch (e) {
       // A captive portal's page, or a half-published catalog: the last good
       // copy is better than nothing.
